@@ -1,6 +1,6 @@
 /** Zero-turn replay: typed dispatch, relocation backoff, divergence. */
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentError } from '../../src/agent/error.ts';
 import type { ExecutorActions } from '../../src/agent/executor.ts';
 import { replayTrace, verifyEndState, type ObservedScreen, type ReplayHost } from '../../src/agent/replay.ts';
@@ -10,6 +10,14 @@ import type { SettleMode } from '../../src/agent/settle-policy.ts';
 import type { ActionTrace, RecordedAction } from '../../src/cache/trace.ts';
 import type { SemanticNode } from '../../src/engine/surface.ts';
 import { redactedNodes } from '../helpers/redacted.ts';
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setTimerTickMode('nextTimerAsync');
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 const upgrade: SemanticNode = { ref: { id: 'n1', revision: 'r1' }, role: 'button', name: 'Upgrade' };
 const email: SemanticNode = { ref: { id: 'n2', revision: 'r1' }, role: 'textbox', name: 'Email' };
@@ -316,7 +324,7 @@ describe('replayTrace', () => {
     );
     expect(outcome).toMatchObject({ completed: false, executed: 0, stopReason: 'target-not-found' });
     expect(host.calls).toEqual([]);
-  }, 15_000);
+  });
 
   it('replays a bare-point hover through hoverAt, on the recorded viewport only', async () => {
     const host = makeHost({});
@@ -332,7 +340,9 @@ describe('replayTrace', () => {
     const host = makeHost({ nodes: [email] });
     const outcome = await replayTrace(host, trace([tapUpgrade]));
     expect(outcome).toMatchObject({ completed: false, executed: 0, stopReason: 'target-not-found' });
-  }, 15_000);
+    // One look, then a retry after each backoff delay until the 15s relocation deadline.
+    expect(host.observations).toBe(9);
+  });
 
   it('keeps looking while a positioned target is ambiguous, since a form still rendering shows fewer twins', async () => {
     const unnamed = (id: string): SemanticNode => ({ ref: { id, revision: 'r1' }, role: 'textbox' });
@@ -585,25 +595,19 @@ describe('replayTrace: bare-point taps', () => {
   });
 
   it('waits for a lost list that filled the screen once per folded scroll, not once per repeat', async () => {
-    vi.useFakeTimers();
-    vi.setTimerTickMode('nextTimerAsync');
-    try {
-      const targets: unknown[] = [];
-      const host = makeHost({ nodes: [email], onAction: (name, detail) => void (name === 'scroll' && targets.push(detail)) });
-      const startedMs = Date.now();
-      const outcome = await replayTrace(
-        host,
-        trace([{ name: 'scroll', summary: 'scroll down x4', direction: 'down', target: { role: 'group', name: 'Rows 1 to 12' }, times: 4, spans: 0.92 }]),
-      );
-      expect(outcome).toMatchObject({ completed: true, executed: 1 });
-      expect(targets).toEqual(Array.from({ length: 4 }, () => ({ direction: 'down', t: undefined })));
-      // One relocation backoff (the first look and eight raw ones over 14s),
-      // then one settled look before each later repeat, as a viewport scroll takes.
-      expect(Date.now() - startedMs).toBe(14_000);
-      expect(host.looks).toEqual(['held-still', ...Array.from({ length: 8 }, () => 'raw'), 'held-still', 'held-still', 'held-still']);
-    } finally {
-      vi.useRealTimers();
-    }
+    const targets: unknown[] = [];
+    const host = makeHost({ nodes: [email], onAction: (name, detail) => void (name === 'scroll' && targets.push(detail)) });
+    const startedMs = Date.now();
+    const outcome = await replayTrace(
+      host,
+      trace([{ name: 'scroll', summary: 'scroll down x4', direction: 'down', target: { role: 'group', name: 'Rows 1 to 12' }, times: 4, spans: 0.92 }]),
+    );
+    expect(outcome).toMatchObject({ completed: true, executed: 1 });
+    expect(targets).toEqual(Array.from({ length: 4 }, () => ({ direction: 'down', t: undefined })));
+    // One relocation backoff (the first look and eight raw ones over 14s),
+    // then one settled look before each later repeat, as a viewport scroll takes.
+    expect(Date.now() - startedMs).toBe(14_000);
+    expect(host.looks).toEqual(['held-still', ...Array.from({ length: 8 }, () => 'raw'), 'held-still', 'held-still', 'held-still']);
   });
 
   it('counts the repeats of a folded scroll that ran before a later one lost the list', async () => {

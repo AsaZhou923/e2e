@@ -3,7 +3,7 @@
 import { mkdtemp, readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushStagedTraces, type AgentCacheContext, type ClaimedKey } from '../../src/cache/context.ts';
 import { instructionDigest, paramsDigest } from '../../src/cache/identity.ts';
 import { StoredRecordings } from '../../src/cache/rekeyed.ts';
@@ -134,6 +134,10 @@ function stagedTrace(context: AgentCacheContext, index = 0): ActionTrace {
   if (staged?.kind !== 'write') throw new Error(`expected a staged write at ${String(index)}, got ${staged?.kind ?? 'nothing'}`);
   return staged.trace;
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('recordedVerdictOf', () => {
   it('returns a summary the replay did not write as it is', () => {
@@ -723,13 +727,17 @@ describe('StepTraceSession', () => {
   });
 
   it('takes no look of the end wait as the end state once the screen moved off the recorded route', async () => {
-    const context = entryContext({ endPath: '/customers', endAnchors: [savedAnchor], endWaitMs: 2_000 });
+    vi.useFakeTimers();
+    vi.setTimerTickMode('nextTimerAsync');
+    const startedMs = Date.now();
+    const context = entryContext({ endPath: '/customers', endAnchors: [savedAnchor], endWaitMs: 30_000 });
     // The route matches first with the effect missing; the anchors then show on another page.
-    const host = { ...makeHost(['/pricing', '/customers', ...Array.from({ length: 20 }, () => '/elsewhere')], [[], [], [savedMarker]]), remainingMs: () => 60_000 };
+    const host = { ...makeHost(['/pricing', '/customers', ...Array.from({ length: 60 }, () => '/elsewhere')], [[], [], [savedMarker]]), remainingMs: () => 60_000 };
     const session = makeSession(context, host);
     expect(await session.begin()).toBeUndefined();
     expect(session.cacheInfo).toMatchObject({ reason: 'end-mismatch' });
-  }, 30_000);
+    expect(Date.now() - startedMs).toBeGreaterThanOrEqual(30_000);
+  });
 
   it('evicts an entry that did not serve a pass with nothing to record in its place', async () => {
     let deleted = 0;
