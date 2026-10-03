@@ -117,8 +117,16 @@ function screen(nodes: readonly SemanticNode[], viewport = VIEWPORT) {
 describe('verifyEndState', () => {
   const saved: SemanticNode = { ref: { id: 'm', revision: 'r1' }, role: 'status', name: 'Marker', text: 'saved' };
   const savedAnchor = { role: 'status', name: 'Marker', text: 'saved' };
-  const verifyAnchors = (host: ReplayHost, endAnchors: readonly TraceTargetDescriptor[]) =>
-    verifyEndState(host, (live) => deltaHolds({ endAnchors }, live.nodes, new Map()));
+  const verifyAnchors = (host: ReplayHost, endAnchors: readonly TraceTargetDescriptor[], waitMs?: number) =>
+    verifyEndState(host, (live) => deltaHolds({ endAnchors }, live.nodes, new Map()), waitMs === undefined ? {} : { waitMs });
+
+  /** A host with `remainingMs` on the step clock whose screen shows the saved marker from `afterMs` on. */
+  const savedAfter = (afterMs: number, remainingMs: number): TestHost => {
+    const from = Date.now() + afterMs;
+    const host = makeHost({ remainingMs });
+    host.capture = async () => screen(Date.now() >= from ? [upgrade, saved] : [upgrade]);
+    return host;
+  };
 
   it('holds when every anchor is present, counting an ambiguous match as presence', async () => {
     const twin: SemanticNode = { ...saved, ref: { id: 'm2', revision: 'r1' } };
@@ -159,6 +167,24 @@ describe('verifyEndState', () => {
     };
     await expect(verifyAnchors(host, [savedAnchor])).resolves.toBe(true);
     expect(shown).toBe(true);
+  });
+
+  it('waits past the settling backoff for an effect the recording waited longer for, while the step clock keeps its reserve', async () => {
+    const startedMs = Date.now();
+    await expect(verifyAnchors(savedAfter(20_000, 120_000), [savedAnchor], 30_000)).resolves.toBe(true);
+    expect(Date.now() - startedMs).toBe(20_000);
+    await expect(verifyAnchors(savedAfter(20_000, 25_000), [savedAnchor], 30_000)).resolves.toBe(false);
+  });
+
+  it('gives up the long end wait when it runs out, or at once when the surface turns to pixels', async () => {
+    const startedMs = Date.now();
+    await expect(verifyAnchors(savedAfter(Infinity, 120_000), [savedAnchor], 30_000)).resolves.toBe(false);
+    expect(Date.now() - startedMs).toBe(30_000);
+    const pixelsFrom = Date.now() + 16_000;
+    const blind = makeHost({ remainingMs: 120_000 });
+    blind.capture = async () => (Date.now() >= pixelsFrom ? { kind: 'pixels', viewport: VIEWPORT } : screen([upgrade]));
+    await expect(verifyEndState(blind, () => Date.now() >= pixelsFrom, { waitMs: 30_000 })).resolves.toBe(false);
+    expect(Date.now()).toBe(pixelsFrom);
   });
 });
 
