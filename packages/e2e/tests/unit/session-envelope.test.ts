@@ -1,9 +1,9 @@
 /** Session envelope wire format. */
 
-import { mkdtemp, readdir, readFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { uuidv7 } from '../../src/internal/ids.ts';
 import type { SavedSecrecy } from '../../src/run/secrecy.ts';
 import { SessionStore, type SavedSession, type SessionIdentity } from '../../src/run/sessions.ts';
@@ -20,10 +20,10 @@ const identity: SessionIdentity = {
 
 const SECRET_VALUE = 'provider-minted-token-7391';
 
-/** Saves one state and returns both the parsed envelope and its store. */
+/** Saves one state and returns the parsed envelope, its raw text, its file, and its store. */
 async function saveEnvelope(
   secrecy: SavedSecrecy = { secrets: [], tainted: false },
-): Promise<{ store: SessionStore; raw: string; envelope: Record<string, unknown> }> {
+): Promise<{ store: SessionStore; raw: string; file: string; envelope: Record<string, unknown> }> {
   const root = await mkdtemp(path.join(tmpdir(), 'e2e-sessions-'));
   const runId = uuidv7();
   const store = SessionStore.create(runId, root);
@@ -34,7 +34,7 @@ async function saveEnvelope(
   const [file] = await readdir(path.join(root, runId));
   expect(file).toMatch(/^web--member-[0-9a-f]{16}\.json$/);
   const raw = await readFile(path.join(root, runId, file!), 'utf8');
-  return { store, raw, envelope: JSON.parse(raw) as Record<string, unknown> };
+  return { store, raw, file: path.join(root, runId, file!), envelope: JSON.parse(raw) as Record<string, unknown> };
 }
 
 describe('session envelope', () => {
@@ -72,6 +72,80 @@ describe('session envelope', () => {
       expect((envelope.secrecy as { names: string[] }).names).toHaveLength(301);
       const loaded = await store.load('member', identity);
       expect(loaded.secrecy.secrets).toEqual(secrets);
+    } finally {
+      store.cleanup();
+    }
+  });
+});
+
+describe('session load', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  type Editable = { state: { ciphertext: string }; secrecy: { tainted: boolean }; expiresAt: string };
+
+  /** Rewrites a saved envelope file through `edit`, as a tamperer with write access to it would. */
+  async function tamper(file: string, edit: (envelope: Editable) => void): Promise<void> {
+    const envelope = JSON.parse(await readFile(file, 'utf8')) as Editable;
+    edit(envelope);
+    await writeFile(file, JSON.stringify(envelope));
+  }
+
+  it('refuses a session saved for another app, engine, or platform', async () => {
+    const { store } = await saveEnvelope();
+    try {
+      for (const other of [
+        { ...identity, appIdentity: 'b'.repeat(64) },
+        { ...identity, engineVersion: '1.62.0' },
+        { ...identity, platform: 'android' },
+      ]) {
+        await expect(store.load('member', other)).rejects.toMatchObject({ code: 'SESSION_MISMATCH' });
+      }
+      expect((await store.load('member', identity)).state.data).toEqual({ cookies: [{ name: 'sid', value: 'abc' }] });
+    } finally {
+      store.cleanup();
+    }
+  });
+
+  it('refuses a session past its expiry', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const { store } = await saveEnvelope();
+    try {
+      vi.setSystemTime(Date.now() + 24 * 60 * 60 * 1000);
+      await expect(store.load('member', identity)).rejects.toMatchObject({ code: 'SESSION_EXPIRED' });
+    } finally {
+      store.cleanup();
+    }
+  });
+
+  it('refuses a session whose ciphertext, taint, or expiry was edited, or that is not JSON', async () => {
+    const edits: ((envelope: Editable) => void)[] = [
+      (envelope) => {
+        const bytes = Buffer.from(envelope.state.ciphertext, 'base64');
+        bytes[0] = bytes[0]! ^ 1;
+        envelope.state.ciphertext = bytes.toString('base64');
+      },
+      (envelope) => {
+        envelope.secrecy.tainted = false;
+      },
+      (envelope) => {
+        envelope.expiresAt = new Date(Date.parse(envelope.expiresAt) + 365 * 24 * 60 * 60 * 1000).toISOString();
+      },
+    ];
+    for (const edit of edits) {
+      const { store, file } = await saveEnvelope({ secrets: [['token', SECRET_VALUE]], tainted: true });
+      try {
+        await tamper(file, edit);
+        await expect(store.load('member', identity)).rejects.toMatchObject({ code: 'SESSION_INVALID' });
+      } finally {
+        store.cleanup();
+      }
+    }
+    const { store, file } = await saveEnvelope();
+    try {
+      await writeFile(file, '{ "schemaVersion": "session-1", ');
+      await expect(store.load('member', identity)).rejects.toMatchObject({ code: 'SESSION_INVALID' });
     } finally {
       store.cleanup();
     }
