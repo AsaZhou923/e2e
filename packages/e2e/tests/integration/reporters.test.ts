@@ -52,7 +52,7 @@ describe('reporter objects', () => {
     };
     const outcome = await runExisting(project, {
       appUrl: app.url,
-      config: { tests: 'tests/**/*.e2e.ts', reporters: [recording], cache: 'off' as const },
+      config: { tests: 'tests/**/*.e2e.ts', reporters: [recording], cache: 'off' as const, video: 'on' as const },
     });
 
     expect(outcome.exitCode).toBe(0);

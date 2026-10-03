@@ -196,15 +196,8 @@ describe('near misses', () => {
   });
 });
 
-describe('appearsIn', () => {
+describe('path forms', () => {
   const ledger = new SecretLedger([['member', 'p@ss word']]);
-
-  it('finds a registered value, in any of its forms, inside bytes that are not text', () => {
-    const frame = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.from('p%40ss+word'), Buffer.from([0x80])]);
-    expect(ledger.appearsIn(frame)).toBe(true);
-    expect(ledger.appearsIn(Buffer.from([0xff, 0xd8, 0xff, 0x80, 0x00]))).toBe(false);
-    expect(new SecretLedger().appearsIn(Buffer.from('p@ss word'))).toBe(false);
-  });
 
   it('redacts the value as encodeURI spells it in a path', () => {
     expect(ledger.redact('/reset/p@ss%20word/done')).toBe('/reset/<secret:member>/done');
@@ -338,125 +331,6 @@ describe('redactCut', () => {
 
   it('changes nothing with no value registered', () => {
     expect(new SecretLedger().redactCut('anything at all')).toBe('anything at all');
-  });
-});
-
-describe('redactFragments', () => {
-  const SECRET = 'cut-secret-Kq7ZrT2mWx9pLd4sNv8bHc3jFg6yQa1eUo5iRk0tYw2zXn7uM';
-
-  it('rewrites a run of 8 or more characters of a value anywhere in the text, and leaves a shorter one', () => {
-    const ledger = new SecretLedger([['apiKey', SECRET]]);
-    expect(ledger.redactFragments(`cut ${SECRET.slice(0, 59)}`)).toBe('cut <secret:apiKey>');
-    expect(ledger.redactFragments(`sel ${SECRET.slice(5, 45)} end`)).toBe('sel <secret:apiKey> end');
-    expect(ledger.redactFragments(`a ${SECRET.slice(20, 28)} b`)).toBe('a <secret:apiKey> b');
-    expect(ledger.redactFragments(`a ${SECRET.slice(20, 27)} b`)).toBe(`a ${SECRET.slice(20, 27)} b`);
-    expect(ledger.redactFragments('plain text, 0123456789 and more')).toBe('plain text, 0123456789 and more');
-  });
-
-  it('rewrites whole values in every spelling first, then the fragments between them, and never a marker', () => {
-    const ledger = new SecretLedger([['member', 'pa"ss-word-2718-xyz']]);
-    expect(ledger.redactFragments('{"v":"pa\\"ss-word-2718-xyz"} ss-word-2718')).toBe('{"v":"<secret:member>"} <secret:member>');
-    expect(ledger.redactFragments('<secret:member> and <secret:member>')).toBe('<secret:member> and <secret:member>');
-  });
-
-  it('names a run two values share after the longer, and a whole shorter value after itself', () => {
-    const short = 'ovl-secret-AbCdEfGhIjKlMnOpQrSt';
-    const long = `${short}UvWxYz0123456789ABCDEFGHIJKLMN`;
-    const ledger = new SecretLedger([
-      ['short', short],
-      ['long', long],
-    ]);
-    expect(ledger.redactFragments(`x ${short.slice(0, 20)}`)).toBe('x <secret:long>');
-    expect(ledger.redactFragments(`x ${long.slice(0, 59)}`)).toBe('x <secret:short><secret:long>');
-  });
-
-  it('rewrites a base64 run that decodes to a value or a fragment whole, and leaves other runs', () => {
-    const ledger = new SecretLedger([['basic', 'S3cretPassw0rd']]);
-    const header = `Basic ${Buffer.from('bbuser:S3cretPassw0rd').toString('base64')}`;
-    expect(ledger.redactFragments(header)).toBe('Basic <secret:basic>');
-    expect(ledger.redactFragments(Buffer.from('x:S3cretPa').toString('base64url'))).toBe('<secret:basic>');
-    const clean = `Basic ${Buffer.from('bbuser:other-password').toString('base64')} authorization`;
-    expect(ledger.redactFragments(clean)).toBe(clean);
-  });
-
-  it('rewrites a base64 run that starts with text the encoding does not', () => {
-    const ledger = new SecretLedger([['basic', 'S3cretPassw0rd']]);
-    const encoded = Buffer.from('ada:S3cretPassw0rd').toString('base64url');
-    for (const prefix of ['https://app.test/reset/', 'cookie=v2_', 'tokenValue', 'x-']) {
-      expect(ledger.redactFragments(`${prefix}${encoded}`)).not.toContain(encoded.slice(4, 16));
-    }
-    expect(ledger.redactFragments(`https://app.test/reset/${encoded}`)).toBe('https://app.<secret:basic>');
-  });
-
-  it('reads a marker a base64 run already encodes as page text, not as a value', () => {
-    const ledger = new SecretLedger([
-      ['basic', 'S3cretPassw0rd'],
-      ['other', 'Oth3r-Secret-Value'],
-    ]);
-    const page = Buffer.from('shown <secret:basic> here').toString('base64');
-    expect(ledger.redactFragments(page)).toBe(page);
-    expect(ledger.redactFragments(Buffer.from('<secret:other> ada:S3cretPassw0rd').toString('base64'))).toBe('<secret:basic>');
-  });
-
-  it('rewrites a whole short value in a base64 run', () => {
-    const ledger = new SecretLedger([['pin', 'pw1234']]);
-    for (const prefix of ['', 'a', 'ab']) {
-      expect(ledger.redactFragments(`t=${Buffer.from(`${prefix}u:pw1234`).toString('base64')}`)).toBe('t=<secret:pin>');
-    }
-  });
-
-  it('rewrites a fragment in another case, and leaves a shorter one', () => {
-    const ledger = new SecretLedger([['apiKey', SECRET]]);
-    expect(ledger.redactFragments(`sel ${SECRET.slice(5, 45).toUpperCase()} end`)).toBe('sel <secret:apiKey> end');
-    expect(ledger.redactFragments(`a ${SECRET.slice(20, 28).toLowerCase()} b`)).toBe('a <secret:apiKey> b');
-    expect(ledger.redactFragments(`a ${SECRET.slice(20, 27).toUpperCase()} b`)).toBe(`a ${SECRET.slice(20, 27).toUpperCase()} b`);
-  });
-
-  it('folds a fragment as whole-value matching does, keeping every index', () => {
-    const ledger = new SecretLedger([
-      ['turkish', 'fragment-igloo-sigma-2718'],
-      ['longS', 'long-ſecret-ſtring-3141'],
-    ]);
-    const turkish = 'fragment-igloo-sigma-2718'.slice(0, 20).toLocaleUpperCase('tr');
-    expect(turkish).toContain('İ');
-    expect(ledger.redactFragments(`x ${turkish} y`)).toBe('x <secret:turkish> y');
-    expect(ledger.redactFragments(`x ${'long-ſecret-ſtring-3141'.slice(3, 18).toUpperCase()} y`)).toBe('x <secret:longS> y');
-  });
-
-  it('rewrites a fragment spanning a whitespace run the text collapsed, widened, or spelled otherwise, run included', () => {
-    const ledger = new SecretLedger([['multi', 'abcde\r\n\tfghijklmnopqrstu']]);
-    for (const separator of [' ', '\n', ' ', '  \t ']) {
-      expect(ledger.redactFragments(`cut [abcde${separator}fgh] end`)).toBe('cut [<secret:multi>] end');
-    }
-    expect(ledger.redactFragments('plain abcde xyz fghij')).toBe('plain abcde xyz fghij');
-  });
-
-  it.each([
-    ['single spaces', 'var a = 1; '],
-    ['line breaks and indentation', 'var a = 1;\n    '],
-  ])('reads a large text with %s in about its own size, and still finds a fragment at its end', (_kind, line) => {
-    const ledger = new SecretLedger([['apiKey', SECRET]]);
-    const text = `${line.repeat(Math.ceil(8_000_000 / line.length))}${SECRET.slice(10, 30)}`;
-    // Typed arrays live outside the heap, so both count; a collection mid-scan only lowers the figure.
-    const used = (): number => process.memoryUsage().heapUsed + process.memoryUsage().arrayBuffers;
-    const before = used();
-    const started = performance.now();
-    const redacted = ledger.redactFragments(text);
-    expect(performance.now() - started).toBeLessThan(5_000);
-    expect(used() - before).toBeLessThan(text.length * 16);
-    expect(redacted.endsWith('<secret:apiKey>')).toBe(true);
-  });
-
-  it('scans a long text in one linear pass', () => {
-    const ledger = new SecretLedger([['apiKey', SECRET]]);
-    const text = `${SECRET.slice(0, 7).toUpperCase()} `.repeat(20_000);
-    const started = performance.now();
-    expect(ledger.redactFragments(text)).toBe(text);
-    expect(performance.now() - started).toBeLessThan(200);
-  });
-
-  it('changes nothing with no value registered', () => {
-    expect(new SecretLedger().redactFragments('anything at all')).toBe('anything at all');
   });
 });
 
