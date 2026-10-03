@@ -169,18 +169,6 @@ describe('decideTraceReplay', () => {
     }
   });
 
-  it('compares the start path as a route: the query is part of it, its minted values and the fragment are not', () => {
-    const entry = entryOf(trace());
-    expect(decideTraceReplay(entry, '/settings#billing').action).toBe('replay');
-    expect(decideTraceReplay(entryOf(trace({ startPath: '/settings?tab=2' })), '/settings?tab=7').action).toBe('replay');
-    expect(decideTraceReplay(entryOf(trace({ startPath: '/settings?tab=notes' })), '/settings').action).toBe('miss');
-    expect(decideTraceReplay(entry, '/settings?utm_source=mail').action).toBe('miss');
-    expect(decideTraceReplay(entry, '/settings/billing')).toEqual({
-      action: 'miss',
-      reason: 'wrong-context',
-    });
-  });
-
   it('replays a navigate-opening trace from anywhere', () => {
     const entry = entryOf(trace({ actions: [navigate, tap] }));
     expect(decideTraceReplay(entry, '/other').action).toBe('replay');

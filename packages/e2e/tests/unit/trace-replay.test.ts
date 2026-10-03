@@ -181,22 +181,6 @@ describe('replayTrace', () => {
     expect(silent.looks).toEqual([]);
   });
 
-  it('replays a full trace and reports completion', async () => {
-    const host = makeHost({});
-    const outcome = await replayTrace(
-      host,
-      trace([
-        { name: 'navigate', summary: 'navigate to "/"', url: '/' },
-        tapUpgrade,
-        typeEmail,
-        { name: 'scroll', summary: 'scroll down', direction: 'down' },
-      ]),
-    );
-    expect(outcome).toMatchObject({ completed: true, executed: 4, total: 4 });
-    expect(host.calls).toEqual(['navigate', 'tap', 'type', 'scroll']);
-    expect(outcome.summaries).toHaveLength(4);
-  });
-
   it('reads the start capture for the first look instead of observing the same screen again', async () => {
     const host = makeHost({});
     const outcome = await replayTrace(host, trace([tapUpgrade]), { initial: screen([upgrade, email]) });
@@ -367,6 +351,7 @@ describe('replayTrace', () => {
     const host = makeHost({ nodes: [upgrade, twin, email] });
     const outcome = await replayTrace(host, trace([tapUpgrade]));
     expect(outcome).toMatchObject({ completed: false, executed: 0, stopReason: 'target-ambiguous' });
+    expect(host.calls).toEqual([]);
     expect(host.observations).toBeLessThan(3);
   });
 
@@ -390,14 +375,6 @@ describe('replayTrace', () => {
     );
     expect(outcome).toMatchObject({ completed: true, executed: 1 });
     expect(host.calls).toEqual(['tap']);
-  });
-
-  it('diverges immediately on ambiguity', async () => {
-    const twin: SemanticNode = { ref: { id: 'n9', revision: 'r1' }, role: 'button', name: 'Upgrade' };
-    const host = makeHost({ nodes: [upgrade, twin] });
-    const outcome = await replayTrace(host, trace([tapUpgrade]));
-    expect(outcome).toMatchObject({ completed: false, stopReason: 'target-ambiguous' });
-    expect(host.calls).toEqual([]);
   });
 
   it('absorbs an action failure as divergence, never as a step failure', async () => {

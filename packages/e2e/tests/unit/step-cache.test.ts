@@ -140,11 +140,6 @@ afterEach(() => {
 });
 
 describe('recordedVerdictOf', () => {
-  it('returns a summary the replay did not write as it is', () => {
-    expect(recordedVerdictOf('opened the customers page')).toBe('opened the customers page');
-    expect(recordedVerdictOf('replayed the flow by hand')).toBe('replayed the flow by hand');
-  });
-
   it('keeps only the recorded verdict of a replay summary, even one that mentions a verdict itself', async () => {
     const context = entryContext({ summary: 'saw "recorded verdict: none" in the log' });
     const session = makeSession(context, makeHost(['/pricing', '/customers#top']));

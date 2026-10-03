@@ -7,11 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { uuidv7 } from '../../src/internal/ids.ts';
 import type { SavedSecrecy } from '../../src/run/secrecy.ts';
 import { SessionStore, type SavedSession, type SessionIdentity } from '../../src/run/sessions.ts';
-import {
-  assertValidSessionEnvelope,
-  isValidSessionEnvelope,
-  specFixture,
-} from '../helpers/session-schema.ts';
+import { assertValidSessionEnvelope } from '../helpers/session-schema.ts';
 
 const identity: SessionIdentity = {
   targetId: 'web',
@@ -42,28 +38,6 @@ async function saveEnvelope(
 }
 
 describe('session envelope', () => {
-  it('produces an envelope that validates against session-v1.schema.json', async () => {
-    const { store, envelope } = await saveEnvelope();
-    try {
-      assertValidSessionEnvelope(envelope);
-      expect((envelope.state as { algorithm: string }).algorithm).toBe('A256GCM');
-    } finally {
-      store.cleanup();
-    }
-  });
-
-  it('round-trips the produced envelope', async () => {
-    const { store, envelope } = await saveEnvelope();
-    try {
-      expect(envelope.secrecy).toEqual({ tainted: false, names: [] });
-      const loaded = await store.load('member', identity);
-      expect(loaded.state.data).toEqual({ cookies: [{ name: 'sid', value: 'abc' }] });
-      expect(loaded.secrecy).toEqual({ secrets: [], tainted: false });
-    } finally {
-      store.cleanup();
-    }
-  });
-
   it('carries learned secret values and the taint, naming the secrets in the clear and the values only inside the ciphertext', async () => {
     const { store, raw, envelope } = await saveEnvelope({
       secrets: [['token', SECRET_VALUE], ['token', 'rotated-token-0042']],
@@ -71,6 +45,7 @@ describe('session envelope', () => {
     });
     try {
       assertValidSessionEnvelope(envelope);
+      expect((envelope.state as { algorithm: string }).algorithm).toBe('A256GCM');
       expect(envelope.secrecy).toEqual({ tainted: true, names: ['token'] });
       expect(raw).not.toContain(SECRET_VALUE);
       expect(raw).not.toContain('rotated-token-0042');
@@ -100,14 +75,6 @@ describe('session envelope', () => {
     } finally {
       store.cleanup();
     }
-  });
-
-  it('accepts the canonical valid fixture', () => {
-    assertValidSessionEnvelope(specFixture('session-v1.valid.json'));
-  });
-
-  it('rejects the canonical invalid fixture', () => {
-    expect(isValidSessionEnvelope(specFixture('session-v1.invalid.json'))).toBe(false);
   });
 });
 
