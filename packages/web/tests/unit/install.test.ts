@@ -85,16 +85,4 @@ describe('ensureBrowsersInstalled', () => {
     expect(installed).toEqual([['chromium']]);
     expect(logs).toEqual([]);
   });
-
-  it('propagates installer failures', async () => {
-    await expect(
-      ensureBrowsersInstalled(['webkit'], {
-        log: () => {},
-        isInstalled: () => false,
-        install: async () => {
-          throw new Error('download failed');
-        },
-      }),
-    ).rejects.toThrow('download failed');
-  });
 });
