@@ -8,6 +8,9 @@ describe('realmSlot', () => {
     const host = {};
     writer.set(host, 'value');
     expect(reader.get(host)).toBe('value');
+    const functionHost = (): void => undefined;
+    writer.set(functionHost, 'on-function');
+    expect(reader.get(functionHost)).toBe('on-function');
   });
 
   it('stores the value non-enumerably so it never leaks via iteration or JSON', () => {
