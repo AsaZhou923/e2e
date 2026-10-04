@@ -73,6 +73,8 @@ describe('cache config resolution', () => {
     expect(resolved.store).toBeUndefined();
     expect(resolved.dir).toBe(path.join(ROOT, '.e2e', 'cache'));
     expect(resolve({ ...APP, cache: { dir: 'shared' } }).cache.dir).toBe(path.join(ROOT, 'shared'));
+    expect(resolve({ ...APP, cache: { mode: 'read-only' } }).cache.mode).toBe('read-only');
+    expect(resolve({ ...APP, cache: { mode: 'off' } }).cache.mode).toBe('off');
   });
 
   it('lets the --no-cache override win over the config, even in CI', () => {

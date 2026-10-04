@@ -97,12 +97,15 @@ describe('session load', () => {
     try {
       for (const other of [
         { ...identity, appIdentity: 'b'.repeat(64) },
+        { ...identity, engineName: 'other' },
         { ...identity, engineVersion: '1.62.0' },
         { ...identity, platform: 'android' },
       ]) {
         await expect(store.load('member', other)).rejects.toMatchObject({ code: 'SESSION_MISMATCH' });
       }
-      expect((await store.load('member', identity)).state.data).toEqual({ cookies: [{ name: 'sid', value: 'abc' }] });
+      const loaded = await store.load('member', identity);
+      expect(loaded.state.data).toEqual({ cookies: [{ name: 'sid', value: 'abc' }] });
+      expect(loaded.secrecy).toEqual({ secrets: [], tainted: false });
     } finally {
       store.cleanup();
     }

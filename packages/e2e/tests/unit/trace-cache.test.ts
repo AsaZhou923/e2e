@@ -161,6 +161,7 @@ describe('decideTraceReplay', () => {
   it('enforces the start-path precondition when the trace does not open with navigate', () => {
     const entry = entryOf(trace());
     expect(decideTraceReplay(entry, '/settings').action).toBe('replay');
+    expect(decideTraceReplay(entryOf(trace({ startPath: '/orders/42' })), '/orders/43917#top').action).toBe('replay');
     for (const currentPath of ['/other', undefined]) {
       expect(decideTraceReplay(entry, currentPath)).toEqual({
         action: 'miss',
