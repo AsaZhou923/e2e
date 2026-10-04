@@ -8,6 +8,7 @@ import {
   withTimeout,
 } from '../../src/internal/time.ts';
 import { E2EError } from '../../src/internal/errors.ts';
+import { EngineError } from '../../src/engine/contract.ts';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -311,6 +312,37 @@ describe('pollCondition', () => {
     await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS / 2);
     controller.abort();
     await assertion;
+  });
+
+  it('ends on the last sample when the deadline cuts a read off, and fails on a read the deadline did not cut', async () => {
+    vi.useFakeTimers();
+    const cut = new EngineError('OPERATION_TIMEOUT', 'locate timed out', { retryable: false });
+    const deadline = new Deadline(350);
+    let calls = 0;
+    const promise = pollCondition({
+      deadline,
+      signal: new AbortController().signal,
+      negated: false,
+      evaluate: async () => {
+        calls += 1;
+        if (deadline.remaining() > 0) return false;
+        throw cut;
+      },
+      onTimeout: () => new Error('poll timed out'),
+    });
+    const assertion = expect(promise).rejects.toThrow('poll timed out');
+    await vi.advanceTimersByTimeAsync(1000);
+    await assertion;
+    expect(calls).toBeGreaterThan(1);
+
+    const early = pollCondition({
+      deadline: new Deadline(5_000),
+      signal: new AbortController().signal,
+      negated: false,
+      evaluate: async () => { throw cut; },
+      onTimeout: () => new Error('poll timed out'),
+    });
+    await expect(early).rejects.toBe(cut);
   });
 
   it('supports an async onTimeout error factory', async () => {
