@@ -62,6 +62,8 @@ describe('SessionHost', { timeout: 60_000 }, () => {
     /** Runs while a config file evaluates, as its top-level code would. */
     readonly evaluate?: (configPath: string) => void;
     readonly onSessionEnd?: (summary: McpSessionSummary) => void;
+    /** Secrets the config declares beside the admin credential. */
+    readonly secrets?: Record<string, string>;
   }
 
   /**
@@ -79,6 +81,7 @@ describe('SessionHost', { timeout: 60_000 }, () => {
           {
             targets: [{ name: 'kiosk', platform: 'kiosk', engine: engine().engine, app: options.app ?? FAKE_APP }],
             credentials: { admin: { username: 'admin', password: 'kiosk-pw' } },
+            ...(options.secrets === undefined ? {} : { secrets: options.secrets }),
             ...(options.trace === undefined ? {} : { trace: options.trace }),
             ...(options.video === undefined ? {} : { video: options.video }),
           } as never,
@@ -387,6 +390,45 @@ describe('SessionHost', { timeout: 60_000 }, () => {
     expect(text).toContain('button "Submit"');
     await flaky.close('done');
     expect(fake.stats()).toMatchObject({ attemptsStarted: 2, attemptsEnded: 2, disposes: 2 });
+  });
+
+  it('redacts a secret an engine error carries from the cleanup line of close_session and the shutdown summary', async () => {
+    const fake = createFakeEngine({
+      onEndAttempt: () => {
+        throw new Error('end failed for admin:kiosk-pw');
+      },
+    });
+    const leaky = host(() => fake);
+    const specs = Object.fromEntries(leaky.toolSpecs().map((spec) => [spec.name, spec]));
+    const signal = new AbortController().signal;
+    await specs['open_session']!.call({}, { signal });
+    const closed = await specs['close_session']!.call({}, { signal });
+    const text = closed.content.map((part) => (part.type === 'text' ? part.text : '')).join('\n');
+    expect(text).toContain('Cleanup:');
+    expect(text).toContain('admin:<secret:');
+    expect(text).not.toContain('kiosk-pw');
+    await leaky.open({});
+    const summary = await leaky.closeAll('server shutdown');
+    expect(summary).toContain('admin:<secret:');
+    expect(summary).not.toContain('kiosk-pw');
+  });
+
+  it("redacts the config's secrets from an open_session failure and the log before any session exists", async () => {
+    const fake = createFakeEngine({
+      onInit: (info) => info.log('booting with token open-fail-token-1'),
+      onStartAttempt: () => {
+        throw new Error('boot failed with token open-fail-token-1');
+      },
+    });
+    const leaky = host(() => fake, { secrets: { bootToken: 'open-fail-token-1' } });
+    const [open] = leaky.toolSpecs();
+    const result = await open!.call({}, { signal: new AbortController().signal });
+    const text = result.content.map((part) => (part.type === 'text' ? part.text : '')).join('\n');
+    expect(result.isError).toBe(true);
+    expect(text).toContain('<secret:bootToken>');
+    expect(text).not.toContain('open-fail-token-1');
+    expect(logs.join('\n')).toContain('booting with token <secret:bootToken>');
+    expect(logs.join('\n')).not.toContain('open-fail-token-1');
   });
 
   it('records only between start_recording and stop_recording, and saves a recording still running at close', async () => {
