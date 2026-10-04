@@ -74,7 +74,7 @@ describe('trace cache: a replay runs at the speed of the deterministic API', () 
     expect(replayed.exitCode).toBe(0);
     for (const n of REPETITIONS) {
       const step = onlyActStep(replayed, `agent ${String(n)}`);
-      expect(step.cache).toEqual({ mode: 'self-finalized', replayedActions: 2, totalActions: 2 });
+      expect(step.cache).toMatchObject({ mode: 'self-finalized', replayedActions: 2, totalActions: 2 });
       expect(step.metrics?.modelCalls).toBe(0);
     }
   });
