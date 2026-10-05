@@ -452,7 +452,7 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
     expect(failed.isError).toBe(true);
     expect(failed.text).toContain('startup leaked <secret:bootToken>');
     expect(failed.text).not.toContain(STARTUP_SECRET);
-    expect(stderr).toContain('startup notice <secret:bootToken>');
+    await expect.poll(() => stderr).toContain('startup notice <secret:bootToken>');
     expect(stderr).not.toContain(STARTUP_SECRET);
   });
 

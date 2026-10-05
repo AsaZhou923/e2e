@@ -71,7 +71,7 @@ Operator output goes to stderr, prefixed `e2e mcp:`. Stdout carries only the
 protocol; anything a config module writes to stdout is redirected.
 
 After a config module loads, the server redacts its registered secret values from
-tool responses, errors, and server log messages. This includes the app URL
+text in tool responses, errors, and server log messages. This includes the app URL
 in `open_session`, config validation and engine startup errors, tool descriptions, and
 session cleanup messages. Provider-backed values join redaction when they
 resolve, including forms derived by the engine.

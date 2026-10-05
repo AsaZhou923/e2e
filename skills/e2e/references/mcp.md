@@ -87,8 +87,8 @@ Resources: `e2e://guide` and `e2e://guide/<topic>` hold this skill.
 
 ## Rules
 
-- After the config module loads, registered secret values are redacted from tool
-  responses, errors, and server log messages, including session opening and
+- After the config module loads, registered secret values are redacted from text
+  in tool responses, errors, and server log messages, including session opening and
   cleanup. Provider-backed values are redacted once they resolve.
 - Record a demo or a bug for a pull request with `start_recording` once the
   screen is set up, and `stop_recording` when the part worth watching is
