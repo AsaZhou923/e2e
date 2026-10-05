@@ -23,7 +23,7 @@ import { LocatorEngine } from '../locator/engine.ts';
 import { allocateAppPorts } from '../run/app-ports.ts';
 import { SharedAppProcesses } from '../run/process-pool.ts';
 import { outputLayout } from '../run/output.ts';
-import { sessionSecrecy } from '../run/secrecy.ts';
+import { registerStaticSecrets, sessionSecrecy } from '../run/secrecy.ts';
 import { openStandaloneAttempt, type StandaloneAttempt } from '../run/standalone.ts';
 import type { AgentParams } from '../types.ts';
 import { createSessionCatalog, isGrammarVerb, type SessionCatalog } from './catalog.ts';
@@ -231,6 +231,7 @@ export class SessionHost {
     const configPath = this.options.locateConfig(options.config);
     this.sessions.claimConfig(id, configPath);
     const loaded = await this.options.loadConfig(configPath);
+    registerStaticSecrets(loaded.allSecrets);
     // A session is its own run: a URL declared with port 0 gets a port here.
     const config = await allocateAppPorts(loaded);
     const target = this.resolveTarget(config, options.target);

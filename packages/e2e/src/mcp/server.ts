@@ -12,9 +12,10 @@ import { McpServer, ResourceTemplate } from '@modelcontextprotocol/server';
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { readGuide, skillTopics } from '../cli/skill.ts';
 import { ConfigurationError, errorMessage } from '../internal/errors.ts';
+import { processSecrets } from '../run/secrecy.ts';
 import { loadProjectConfig, locateProjectConfig } from './config.ts';
 import { SessionHost } from './session.ts';
-import { errorResult } from './tools.ts';
+import { errorResult, redactResult } from './tools.ts';
 import type { McpSessionSummary } from './usage.ts';
 
 /** The client as it named itself in `initialize`. */
@@ -61,8 +62,9 @@ export async function serveMcp(options: ServeOptions): Promise<number> {
   );
   let disconnected = false;
   const log = (level: LogLevel, message: string): void => {
-    options.log(`[${level}] ${message}`);
-    if (!disconnected && server.isConnected()) void server.sendLoggingMessage({ level, logger: 'e2e', data: message }).catch(() => undefined);
+    const redacted = processSecrets.redact(message);
+    options.log(`[${level}] ${redacted}`);
+    if (!disconnected && server.isConnected()) void server.sendLoggingMessage({ level, logger: 'e2e', data: redacted }).catch(() => undefined);
   };
 
   const host = new SessionHost({
@@ -90,9 +92,9 @@ export async function serveMcp(options: ServeOptions): Promise<number> {
       async (args, ctx) => {
         // A failure is a result the agent can react to, never a protocol error.
         try {
-          return await spec.call(args, { signal: ctx.mcpReq.signal });
+          return redactResult(await spec.call(args, { signal: ctx.mcpReq.signal }), processSecrets.redact);
         } catch (cause) {
-          return errorResult(cause);
+          return redactResult(errorResult(cause), processSecrets.redact);
         }
       },
     );
@@ -120,14 +122,14 @@ export async function serveMcp(options: ServeOptions): Promise<number> {
   await server.connect(transport);
   log('info', `e2e mcp ${options.version} serving ${options.cwd}`);
   const reason = await closed;
-  if (disconnected) options.log('[info] client disconnected; closing every session');
+  if (disconnected) options.log(`[info] ${processSecrets.redact('client disconnected; closing every session')}`);
   try {
     const summary = await host.closeAll(reason);
-    if (summary !== undefined) options.log(summary);
+    if (summary !== undefined) options.log(processSecrets.redact(summary));
   } catch (cause) {
-    options.log(`session teardown failed: ${errorMessage(cause)}`);
+    options.log(processSecrets.redact(`session teardown failed: ${errorMessage(cause)}`));
   }
-  await server.close().catch((cause: unknown) => options.log(`server close failed: ${errorMessage(cause)}`));
+  await server.close().catch((cause: unknown) => options.log(processSecrets.redact(`server close failed: ${errorMessage(cause)}`)));
   return 0;
 }
 

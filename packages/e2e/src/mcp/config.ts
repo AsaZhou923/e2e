@@ -2,7 +2,8 @@
 
 import path from 'node:path';
 import { discoverConfig, loadConfigModule, missingConfigError } from '../config/load.ts';
-import { resolveConfig, type ResolvedConfig } from '../config/resolve.ts';
+import { resolveConfig, resolveSecrets, type ResolvedConfig } from '../config/resolve.ts';
+import { registerStaticSecrets } from '../run/secrecy.ts';
 
 export interface ProjectOptions {
   readonly cwd: string;
@@ -30,5 +31,6 @@ export function locateProjectConfig(options: ProjectOptions): string {
  */
 export async function loadProjectConfig(configPath: string, env: NodeJS.ProcessEnv): Promise<LoadedConfig> {
   const raw = await loadConfigModule(configPath, { graph: true });
+  registerStaticSecrets(resolveSecrets(raw, env).allSecrets);
   return { ...resolveConfig(raw, { projectRoot: path.dirname(configPath), configPath, env }), configPath };
 }

@@ -41,6 +41,47 @@ export default {
 } satisfies E2EConfig;
 `;
 
+const MCP_STATIC_SECRET = 'mcp-static-SUPERSECRET-0000';
+const LEAKY_CONFIG = `import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+
+export default {
+  targets: [{ name: 'leaky', engine: web(), app: { url: \`\${process.env.APP_URL!}/${MCP_STATIC_SECRET}\` } }],
+  secrets: { apiKey: ${JSON.stringify(MCP_STATIC_SECRET)} },
+} satisfies E2EConfig;
+`;
+const INVALID_APP_URL_CONFIG = `import type { E2EConfig } from 'e2e';
+import { web } from '@e2e-dev/web';
+
+export default {
+  targets: [{ name: 'invalid-url', engine: web(), app: { url: ${JSON.stringify(`ftp://127.0.0.1/${MCP_STATIC_SECRET}`)} } }],
+  secrets: { apiKey: ${JSON.stringify(MCP_STATIC_SECRET)} },
+} satisfies E2EConfig;
+`;
+
+const STARTUP_SECRET = 'mcp-startup-SUPERSECRET-0000';
+const STARTUP_ENGINE = `import { createFakeEngine, FAKE_APP } from '../../helpers/fake-engine.ts';
+
+export const startup = createFakeEngine({
+  onInit(info) {
+    info.log('startup notice ${STARTUP_SECRET}');
+  },
+  onStartAttempt() {
+    throw new Error('startup leaked ${STARTUP_SECRET}');
+  },
+});
+
+export { FAKE_APP };
+`;
+const STARTUP_CONFIG = `import type { E2EConfig } from 'e2e';
+import { startup, FAKE_APP } from './startup-engine.ts';
+
+export default {
+  targets: [{ name: 'startup', platform: 'kiosk', engine: startup.engine, app: FAKE_APP }],
+  secrets: { bootToken: ${JSON.stringify(STARTUP_SECRET)} },
+} satisfies E2EConfig;
+`;
+
 // A second config beside the first: a target whose engine answers basic auth
 // with a secret, on a page that echoes the Authorization header back.
 const PROTECTED_PASSWORD = 'basic-Pa55-7Qz';
@@ -142,6 +183,10 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
     project = createProject({
       'e2e.config.ts': CONFIG,
       'targets.ts': TARGETS,
+      'leaky.config.ts': LEAKY_CONFIG,
+      'invalid-app-url.config.ts': INVALID_APP_URL_CONFIG,
+      'startup.config.ts': STARTUP_CONFIG,
+      'startup-engine.ts': STARTUP_ENGINE,
       'protected.config.ts': PROTECTED_CONFIG,
       'kiosk.ts': KIOSK,
       'custom.config.ts': CUSTOM_CONFIG,
@@ -387,6 +432,30 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
     expect(closed.isError, closed.text).toBe(false);
   });
 
+  it('redacts configured secrets from open-session text and startup failures', async () => {
+    const invalidAppUrl = await invoke('open_session', { config: 'invalid-app-url.config.ts' });
+    expect(invalidAppUrl.isError).toBe(true);
+    expect(invalidAppUrl.text).toContain('INVALID_APP_URL');
+    expect(invalidAppUrl.text).toContain('<secret:apiKey>');
+    expect(invalidAppUrl.text).not.toContain(MCP_STATIC_SECRET);
+
+    const opened = await invoke('open_session', { config: 'leaky.config.ts' });
+    expect(opened.isError, opened.text).toBe(false);
+    expect(opened.text).toContain('App: ');
+    expect(opened.text).toContain('<secret:apiKey>');
+    expect(opened.text).not.toContain(MCP_STATIC_SECRET);
+
+    const closed = await invoke('close_session');
+    expect(closed.isError, closed.text).toBe(false);
+
+    const failed = await invoke('open_session', { config: 'startup.config.ts' });
+    expect(failed.isError).toBe(true);
+    expect(failed.text).toContain('startup leaked <secret:bootToken>');
+    expect(failed.text).not.toContain(STARTUP_SECRET);
+    expect(stderr).toContain('startup notice <secret:bootToken>');
+    expect(stderr).not.toContain(STARTUP_SECRET);
+  });
+
   it('shows a generic secret filled into a plain textbox by name in locate and observe, never the plaintext', async () => {
     const opened = await invoke('open_session');
     expect(opened.isError, opened.text).toBe(false);
@@ -428,6 +497,16 @@ describe('e2e mcp', { timeout: 120_000 }, () => {
     }
     const closed = await invoke('close_session');
     expect(closed.isError, closed.text).toBe(false);
+
+    const afterClose = await invoke('call', { tool: 'observe', session: PROTECTED_PASSWORD });
+    expect(afterClose.isError).toBe(true);
+    expect(afterClose.text).toContain('NO_SESSION: session "<secret:stagingPassword>" is not open');
+    expect(afterClose.text).not.toContain(PROTECTED_PASSWORD);
+
+    const derivedAfterClose = await invoke('call', { tool: 'observe', session: PROTECTED_CREDENTIAL });
+    expect(derivedAfterClose.isError).toBe(true);
+    expect(derivedAfterClose.text).toContain('NO_SESSION: session "<secret:stagingPassword>" is not open');
+    expect(derivedAfterClose.text).not.toContain(PROTECTED_CREDENTIAL);
   });
 
   it('needs a target name when the config declares several', async () => {
